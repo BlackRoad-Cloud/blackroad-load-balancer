@@ -1,56 +1,79 @@
-# BlackRoad Load Balancer
+# blackroad-auto-scaler
 
-> Multi-algorithm load balancer with health checking, P95 latency tracking, and thread-safe connection management.
+> Horizontal auto-scaler with CPU/RPS-based policies, cooldown enforcement, multi-metric ingestion, and full scaling history. SQLite backed.
 
 ## Features
 
-- `BackendServer` — host, port, weight, health, active_conns, response_times
-- P95 latency and error rate per server
-- **Algorithms**: `round_robin`, `weighted_round_robin`, `least_connections`, `ip_hash`, `random`, `least_response_time`
-- `add_server()`, `remove_server()` — dynamic backend management
-- `get_next_server(algorithm, client_ip)` — thread-safe selection
-- `health_check()` / `health_check_all()` — HTTP health probes
-- `stats_report()` — global and per-server statistics
-- `simulate_requests()` — load distribution testing
-- SQLite persistence with WAL mode
-- CLI: `add`, `remove`, `list`, `balance`, `health`, `stats`, `simulate`
+- **Dual signal scaling** — scale on CPU% and/or RPS independently
+- **Configurable bands** — tolerance window to prevent oscillation
+- **Cooldown enforcement** — per-policy cooldown between scaling events
+- **Step-based scaling** — configurable scale_up_step and scale_down_step
+- **Metric rolling window** — evaluate over configurable time window (default 5 min)
+- **Scaling history** — every decision recorded with reason and metrics
+- **Summary dashboard** — current state of all services at a glance
+- **SQLite persistence** — `~/.blackroad/auto_scaler.db`
 
-## Usage
+## Quick start
 
 ```bash
-# Add backend servers
-python src/load_balancer.py add 10.0.0.1 8080 --weight 2
-python src/load_balancer.py add 10.0.0.2 8080 --weight 1
-python src/load_balancer.py add 10.0.0.3 8080 --weight 3
+pip install -r requirements.txt
 
-# Get next server (various algorithms)
-python src/load_balancer.py balance --algorithm round_robin
-python src/load_balancer.py balance --algorithm least_connections
-python src/load_balancer.py balance --algorithm ip_hash --client-ip 192.168.1.50
+# Add policy
+python src/auto_scaler.py add-policy api \
+  --min 2 --max 20 --target-cpu 70 --target-rps 100 --cooldown 60
 
-# Health check all backends
-python src/load_balancer.py health
+# Ingest metrics
+python src/auto_scaler.py ingest api --cpu 92.5 --rps 350 --replicas 4
 
-# View stats
-python src/load_balancer.py stats
+# Evaluate & apply
+python src/auto_scaler.py apply api
 
-# Simulate 1000 requests
-python src/load_balancer.py simulate --count 1000 --algorithm weighted_round_robin
+# History
+python src/auto_scaler.py history api
+
+# Dashboard
+python src/auto_scaler.py summary
 ```
 
-## Algorithm Summary
+## API
 
-| Algorithm | Best For |
-|-----------|----------|
-| `round_robin` | Equal-capacity backends |
-| `weighted_round_robin` | Mixed-capacity backends |
-| `least_connections` | Long-lived connections (WebSocket, gRPC) |
-| `ip_hash` | Session affinity (sticky sessions) |
-| `random` | Simple stateless services |
-| `least_response_time` | Latency-sensitive workloads |
+```python
+from src.auto_scaler import add_policy, ingest_metric, evaluate_scaling, apply_scaling, evaluate_and_apply
 
-## Tests
+# Configure policy
+add_policy("api", min_replicas=2, max_replicas=20,
+           target_cpu_pct=70.0, target_rps=100.0, cooldown_secs=60)
+
+# Feed metrics
+ingest_metric("api", cpu_pct=92.5, rps=350.0, replicas=4)
+
+# Evaluate (non-destructive)
+decision = evaluate_scaling("api")
+print(decision.action, decision.new_replicas, decision.reason)
+
+# Apply
+result = evaluate_and_apply("api")
+# {"service": "api", "old_replicas": 4, "new_replicas": 6, "action": "scale_up"}
+
+# History
+history = get_scaling_history("api", limit=20)
+```
+
+## Scale logic
+
+```
+if avg_cpu > target_cpu + band OR avg_rps > target_rps * (1 + band):
+    scale_up by scale_up_step (capped at max_replicas)
+elif avg_cpu < target_cpu - band AND avg_rps < target_rps * (1 - band):
+    scale_down by scale_down_step (floored at min_replicas)
+else:
+    no action
+```
+
+Cooldown and min/max bounds are always respected.
+
+## Testing
 
 ```bash
-pytest tests/ -v --cov=src
+pytest tests/ -v
 ```
