@@ -1,3 +1,11 @@
+# blackroad-load-balancer
+
+> BlackRoad Cloud Infrastructure: blackroad-load-balancer
+
+Part of the [BlackRoad OS](https://blackroad.io) ecosystem — [BlackRoad-Cloud](https://github.com/BlackRoad-Cloud)
+
+---
+
 # blackroad-auto-scaler
 
 > Horizontal auto-scaler with CPU/RPS-based policies, cooldown enforcement, multi-metric ingestion, and full scaling history. SQLite backed.
